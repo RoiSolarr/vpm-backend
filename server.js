@@ -5,40 +5,74 @@ import fetch from "node-fetch";
 const app = express();
 app.use(express.json());
 
+// Make sure you set this environment variable
 const DB_URL = process.env.FIREBASE_DB_URL;
 
-// run every 15 minutes/ change to 10sec for trial
+if (!DB_URL) {
+    console.error("❌ FIREBASE_DB_URL is not set. Exiting.");
+    process.exit(1);
+}
+
+const TWO_MINUTES = 2 * 60 * 1000; // 2 minutes in ms
+
+// Cron job: runs every 10 seconds (for testing)
 cron.schedule("*/10 * * * * *", async () => {
+    try {
+        console.log("⏱ Checking delivered orders...");
 
-    console.log("Checking delivered orders...");
+        const res = await fetch(`${DB_URL}/orders.json`);
+        if (!res.ok) {
+            console.error("❌ Failed to fetch orders:", res.status, res.statusText);
+            return;
+        }
 
-    const orders = await fetch(`${DB_URL}/orders.json`).then(r => r.json());
+        const orders = await res.json();
+        if (!orders) {
+            console.log("⚠️ No orders found.");
+            return;
+        }
 
-    if (!orders) return;
+        const now = Date.now();
 
-    const now = Date.now();
-    const oneDay = 2 * 60 * 1000; // 2 minutes
+        for (const orderId in orders) {
+            const order = orders[orderId];
 
-    for (const orderId in orders) {
-        const order = orders[orderId];
+            if (order.status === "Delivered" && order.deliveredAt) {
+                const deliveredAt = Number(order.deliveredAt);
 
-        if (order.status === "Delivered" && order.deliveredAt) {
-            if (now - order.deliveredAt >= oneDay) {
+                if (isNaN(deliveredAt)) {
+                    console.warn(`⚠️ Order ${orderId} has invalid deliveredAt:`, order.deliveredAt);
+                    continue;
+                }
 
-                // move to history
-                await fetch(`${DB_URL}/orderHistory/${orderId}.json`, {
-                    method: "PUT",
-                    body: JSON.stringify({ ...order, status: "Completed" })
-                });
+                if (now - deliveredAt >= TWO_MINUTES) {
+                    // Move to history
+                    const putRes = await fetch(`${DB_URL}/orderHistory/${orderId}.json`, {
+                        method: "PUT",
+                        body: JSON.stringify({ ...order, status: "Completed" })
+                    });
 
-                // remove from active
-                await fetch(`${DB_URL}/orders/${orderId}.json`, {
-                    method: "DELETE"
-                });
+                    if (!putRes.ok) {
+                        console.error("❌ Failed to move order to history:", orderId);
+                        continue;
+                    }
 
-                console.log("Auto moved:", orderId);
+                    // Remove from active orders
+                    const delRes = await fetch(`${DB_URL}/orders/${orderId}.json`, {
+                        method: "DELETE"
+                    });
+
+                    if (!delRes.ok) {
+                        console.error("❌ Failed to delete order:", orderId);
+                        continue;
+                    }
+
+                    console.log("✅ Auto moved order:", orderId);
+                }
             }
         }
+    } catch (err) {
+        console.error("❌ Cron job error:", err);
     }
 });
 
@@ -47,6 +81,5 @@ app.get("/", (req, res) => {
 });
 
 app.listen(10000, () => {
-    console.log("Server running at port 10000");
+    console.log("🚀 Server running at port 10000");
 });
-
