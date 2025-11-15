@@ -5,7 +5,7 @@ import fetch from "node-fetch";
 const app = express();
 app.use(express.json());
 
-const DB_URL = "https://vpmonline-99ca1-default-rtdb.asia-southeast1.firebasedatabase.app";
+const DB_URL = process.env.FIREBASE_DB_URL;
 
 // run every 15 minutes/ change to 10sec for trial
 cron.schedule("*/10 * * * * *", async () => {
@@ -49,3 +49,4 @@ app.get("/", (req, res) => {
 app.listen(10000, () => {
     console.log("Server running at port 10000");
 });
+
